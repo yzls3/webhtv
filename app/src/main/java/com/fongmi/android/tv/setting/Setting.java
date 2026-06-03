@@ -1,8 +1,8 @@
 package com.fongmi.android.tv.setting;
 
 import android.Manifest;
+import android.content.pm.ApplicationInfo;
 import android.content.Intent;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
@@ -10,10 +10,10 @@ import android.os.Environment;
 import android.provider.Settings;
 
 import androidx.core.content.ContextCompat;
-import android.webkit.WebView;
 
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.BuildConfig;
+import com.fongmi.android.tv.utils.WebViewUtil;
 import com.github.catvod.crawler.DebugLogStore;
 import com.github.catvod.crawler.SpiderDebug;
 import com.github.catvod.utils.Prefers;
@@ -126,13 +126,15 @@ public class Setting {
     }
 
     public static void logDebugEnvironment(String reason) {
-        SpiderDebug.log("env", "reason=%s app=%s(%s) mode=%s abi=%s debug=%s android=%s sdk=%s incremental=%s manufacturer=%s brand=%s model=%s device=%s product=%s supportedAbis=%s",
+        boolean hardwareAccelerated = (App.get().getApplicationInfo().flags & ApplicationInfo.FLAG_HARDWARE_ACCELERATED) != 0;
+        SpiderDebug.log("env", "reason=%s app=%s(%s) mode=%s abi=%s debug=%s hardware=%s android=%s sdk=%s incremental=%s manufacturer=%s brand=%s model=%s device=%s product=%s supportedAbis=%s",
                 reason,
                 BuildConfig.VERSION_NAME,
                 BuildConfig.VERSION_CODE,
                 BuildConfig.FLAVOR_mode,
                 BuildConfig.FLAVOR_abi,
                 BuildConfig.DEBUG,
+                hardwareAccelerated,
                 Build.VERSION.RELEASE,
                 Build.VERSION.SDK_INT,
                 Build.VERSION.INCREMENTAL,
@@ -142,21 +144,7 @@ public class Setting {
                 Build.DEVICE,
                 Build.PRODUCT,
                 String.join(",", Build.SUPPORTED_ABIS));
-        logWebViewProvider();
-    }
-
-    private static void logWebViewProvider() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            SpiderDebug.log("webview", "provider unavailable sdk=%s", Build.VERSION.SDK_INT);
-            return;
-        }
-        try {
-            PackageInfo info = WebView.getCurrentWebViewPackage();
-            if (info == null) SpiderDebug.log("webview", "provider unavailable");
-            else SpiderDebug.log("webview", "provider package=%s version=%s", info.packageName, info.versionName);
-        } catch (Throwable e) {
-            SpiderDebug.log("webview", e);
-        }
+        WebViewUtil.logProvider("debug-env");
     }
 
     public static boolean isShellProxy() {

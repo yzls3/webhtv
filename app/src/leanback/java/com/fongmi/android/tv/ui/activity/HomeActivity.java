@@ -627,7 +627,11 @@ public class HomeActivity extends BaseActivity implements CustomTitleView.Listen
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (KeyUtil.isMenuKey(event)) showDialog();
+        if (KeyUtil.isMenuKey(event)) {
+            showDialog();
+            return true;
+        }
+        if (mWeb != null && mWeb.isVisible() && mWeb.dispatchKeyEvent(event)) return true;
         if (mWeb != null && mWeb.isVisible()) return super.dispatchKeyEvent(event);
         if (KeyUtil.isActionDown(event) & KeyUtil.isUpKey(event) && mBinding.typeRecycler.hasFocus()) return requestTitleFocus();
         if (KeyUtil.isActionDown(event) & KeyUtil.isDownKey(event) && mBinding.typeRecycler.hasFocus()) return requestContentFocus();

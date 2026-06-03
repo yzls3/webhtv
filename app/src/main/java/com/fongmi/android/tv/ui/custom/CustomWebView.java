@@ -26,6 +26,7 @@ import com.fongmi.android.tv.api.config.VodConfig;
 import com.fongmi.android.tv.impl.ParseCallback;
 import com.fongmi.android.tv.setting.Setting;
 import com.fongmi.android.tv.ui.dialog.WebDialog;
+import com.fongmi.android.tv.utils.WebViewUtil;
 import com.fongmi.android.tv.utils.Sniffer;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderDebug;
@@ -74,6 +75,7 @@ public class CustomWebView extends WebView implements DialogInterface.OnDismissL
         timer = () -> stop(true);
         urls = new LinkedHashSet<>();
         empty = new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream("".getBytes()));
+        WebViewUtil.configureBase(this, "parse");
         WebSettings setting = getSettings();
         setting.setSupportZoom(true);
         setting.setUseWideViewPort(true);

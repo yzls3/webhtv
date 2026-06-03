@@ -5,8 +5,8 @@ import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
-import android.os.Build;
 import android.text.TextUtils;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -14,7 +14,6 @@ import android.webkit.ConsoleMessage;
 import android.webkit.WebChromeClient;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebResourceRequest;
-import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
@@ -22,14 +21,18 @@ import com.github.catvod.crawler.SpiderDebug;
 import com.fongmi.android.tv.api.config.VodConfig;
 import com.fongmi.android.tv.bean.Site;
 import com.fongmi.android.tv.server.Server;
+import com.fongmi.android.tv.utils.KeyUtil;
 import com.fongmi.android.tv.utils.Notify;
 import com.fongmi.android.tv.utils.UrlUtil;
+import com.fongmi.android.tv.utils.Util;
+import com.fongmi.android.tv.utils.WebViewUtil;
 
 import java.util.Locale;
 
 public class HomeWebController {
 
     private static final String BRIDGE = "fongmiBridge";
+    private static final int SLOW_KEY_MS = 24;
 
     private final Listener listener;
     private final Activity activity;
@@ -37,6 +40,7 @@ public class HomeWebController {
     private final float density;
     private String homePage;
     private long pauseAt;
+    private long lastKeyAt;
 
     public HomeWebController(Activity activity, WebView webView, Listener listener) {
         this.activity = activity;
@@ -48,25 +52,16 @@ public class HomeWebController {
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     private void init() {
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setDatabaseEnabled(true);
-        settings.setUseWideViewPort(true);
-        settings.setLoadWithOverviewMode(true);
-        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
-        settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        WebViewUtil.configureHome(webView);
         webView.setBackgroundColor(Color.TRANSPARENT);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
-        webView.setFocusable(true);
-        webView.setFocusableInTouchMode(true);
+        webView.setOnFocusChangeListener((v, hasFocus) -> SpiderDebug.log("webhome-focus", "webview focus=%s visible=%s url=%s", hasFocus, isVisible(), webView.getUrl()));
         webView.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> injectViewport());
         webView.addJavascriptInterface(new HomeWebBridge(this, activity, webView), BRIDGE);
         webView.setWebViewClient(client());
         webView.setWebChromeClient(chrome());
-        logWebViewProvider();
+        WebViewUtil.logProvider("webhome");
     }
 
     public boolean load(Site site) {
@@ -96,7 +91,7 @@ public class HomeWebController {
 
     public void show() {
         webView.setVisibility(View.VISIBLE);
-        webView.requestFocus();
+        focusWebView("show");
     }
 
     public void hide() {
@@ -158,7 +153,7 @@ public class HomeWebController {
     private void recoverAfterResume() {
         if (!isVisible()) return;
         webView.setBackgroundColor(Color.TRANSPARENT);
-        webView.requestFocus();
+        focusWebView("resume");
         webView.requestLayout();
         webView.invalidate();
         webView.postInvalidateOnAnimation();
@@ -186,6 +181,35 @@ public class HomeWebController {
         }, 50);
     }
 
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (!isVisible() || !Util.isLeanback() || !isRemoteKey(event)) return false;
+        long start = System.currentTimeMillis();
+        long gap = lastKeyAt > 0 ? start - lastKeyAt : -1;
+        lastKeyAt = start;
+        focusWebView("key");
+        boolean handled = webView.dispatchKeyEvent(event);
+        long cost = System.currentTimeMillis() - start;
+        if (cost >= SLOW_KEY_MS || (KeyUtil.isActionDown(event) && event.getRepeatCount() > 0 && cost >= 12)) {
+            SpiderDebug.log("webhome-key", "slow action=%s key=%s repeat=%s handled=%s cost=%sms gap=%sms focus=%s url=%s",
+                    event.getAction(), event.getKeyCode(), event.getRepeatCount(), handled, cost, gap, webView.hasFocus(), webView.getUrl());
+        }
+        return handled;
+    }
+
+    private boolean isRemoteKey(KeyEvent event) {
+        return KeyUtil.isUpKey(event)
+                || KeyUtil.isDownKey(event)
+                || KeyUtil.isLeftKey(event)
+                || KeyUtil.isRightKey(event)
+                || KeyUtil.isEnterKey(event);
+    }
+
+    private void focusWebView(String reason) {
+        if (webView.hasFocus()) return;
+        boolean ok = webView.requestFocus();
+        SpiderDebug.log("webhome-focus", "request reason=%s ok=%s visible=%s width=%s height=%s url=%s", reason, ok, isVisible(), webView.getWidth(), webView.getHeight(), webView.getUrl());
+    }
+
     private void dispatchLifecycle(String event, String detail) {
         String script = "(function(){try{window.dispatchEvent(new CustomEvent('" + event + "',{detail:" + detail + "}));}catch(e){}})();";
         webView.post(() -> webView.evaluateJavascript(script, null));
@@ -205,6 +229,7 @@ public class HomeWebController {
                 super.onPageFinished(view, url);
                 SpiderDebug.log("webhome-webview", "page finished url=%s title=%s", url, view.getTitle());
                 injectSdk();
+                focusWebView("page-finished");
                 listener.onWebReady();
             }
 
@@ -247,20 +272,6 @@ public class HomeWebController {
                 return super.onConsoleMessage(message);
             }
         };
-    }
-
-    private void logWebViewProvider() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        try {
-            android.content.pm.PackageInfo info = WebView.getCurrentWebViewPackage();
-            if (info == null) {
-                SpiderDebug.log("webhome-webview", "provider unavailable");
-            } else {
-                SpiderDebug.log("webhome-webview", "provider package=%s version=%s", info.packageName, info.versionName);
-            }
-        } catch (Throwable e) {
-            SpiderDebug.log("webhome-webview", e);
-        }
     }
 
     private void injectSdk() {
