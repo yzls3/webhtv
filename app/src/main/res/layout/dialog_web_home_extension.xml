@@ -159,7 +159,7 @@
         app:hintEnabled="false"
         app:hintTextColor="#5F6368">
 
-        <com.google.android.material.textfield.TextInputEditText
+        <com.fongmi.android.tv.ui.custom.SafeScrollEditText
             android:id="@+id/jsonText"
             android:layout_width="match_parent"
             android:layout_height="match_parent"

@@ -155,7 +155,7 @@
             app:boxStrokeColor="@color/dialog_outlined_button_stroke"
             app:hintEnabled="false">
 
-            <com.google.android.material.textfield.TextInputEditText
+            <com.fongmi.android.tv.ui.custom.SafeScrollEditText
                 android:id="@+id/consoleText"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
@@ -178,7 +178,7 @@
             app:boxStrokeColor="@color/dialog_outlined_button_stroke"
             app:hintEnabled="false">
 
-            <com.google.android.material.textfield.TextInputEditText
+            <com.fongmi.android.tv.ui.custom.SafeScrollEditText
                 android:id="@+id/elementsText"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
@@ -349,8 +349,13 @@
                     android:layout_height="32dp"
                     android:minHeight="32dp"
                     android:minWidth="0dp"
-                    android:text="@string/web_home_extension_network_detail_smaller"
+                    android:contentDescription="@string/web_home_extension_network_detail_smaller"
+                    android:text=""
                     android:textColor="@color/dialog_outlined_button_text"
+                    app:icon="@drawable/ic_detail_minus"
+                    app:iconGravity="textTop"
+                    app:iconPadding="0dp"
+                    app:iconTint="@color/dialog_outlined_button_text"
                     app:backgroundTint="@color/dialog_outlined_button_bg"
                     app:strokeColor="@color/dialog_outlined_button_stroke" />
 
@@ -362,8 +367,13 @@
                     android:layout_marginStart="8dp"
                     android:minHeight="32dp"
                     android:minWidth="0dp"
-                    android:text="@string/web_home_extension_network_detail_bigger"
+                    android:contentDescription="@string/web_home_extension_network_detail_bigger"
+                    android:text=""
                     android:textColor="@color/dialog_outlined_button_text"
+                    app:icon="@drawable/ic_detail_plus"
+                    app:iconGravity="textTop"
+                    app:iconPadding="0dp"
+                    app:iconTint="@color/dialog_outlined_button_text"
                     app:backgroundTint="@color/dialog_outlined_button_bg"
                     app:strokeColor="@color/dialog_outlined_button_stroke" />
 
@@ -375,7 +385,7 @@
                 android:layout_height="128dp"
                 android:background="#FAFAFA">
 
-                <EditText
+                <com.fongmi.android.tv.ui.custom.SafeScrollEditText
                     android:id="@+id/networkDetail"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
@@ -404,7 +414,7 @@
             app:boxStrokeColor="@color/dialog_outlined_button_stroke"
             app:hintEnabled="false">
 
-            <com.google.android.material.textfield.TextInputEditText
+            <com.fongmi.android.tv.ui.custom.SafeScrollEditText
                 android:id="@+id/codeText"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"

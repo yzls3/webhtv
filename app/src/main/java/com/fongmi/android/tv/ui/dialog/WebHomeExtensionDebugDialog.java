@@ -175,7 +175,7 @@ public class WebHomeExtensionDebugDialog extends BaseAlertDialog implements Home
     }
 
     private void showTab(int tab) {
-        binding.web.setVisibility(tab == R.id.tabWeb ? View.VISIBLE : View.GONE);
+        binding.web.setVisibility(View.VISIBLE);
         binding.consoleLayout.setVisibility(tab == R.id.tabConsole ? View.VISIBLE : View.GONE);
         binding.elementsLayout.setVisibility(tab == R.id.tabElements ? View.VISIBLE : View.GONE);
         binding.networkLayout.setVisibility(tab == R.id.tabNetwork ? View.VISIBLE : View.GONE);
@@ -213,7 +213,7 @@ public class WebHomeExtensionDebugDialog extends BaseAlertDialog implements Home
                       id:el.id||'',
                       className:typeof el.className==='string'?el.className:'',
                       text:(el.innerText||el.textContent||'').trim().replace(/\\s+/g,' ').slice(0,500),
-                      html:(el.outerHTML||'').slice(0,200000),
+                      html:(el.outerHTML||'').slice(0,12000),
                       x:Math.round(rect.left),y:Math.round(rect.top),w:Math.round(rect.width),h:Math.round(rect.height)
                     };
                   }
@@ -269,6 +269,7 @@ public class WebHomeExtensionDebugDialog extends BaseAlertDialog implements Home
         appendConsole("EXT preview saved, extension enabled, reload requested");
         WebHomeExtensionRegistry.get().clear();
         if (controller != null) controller.reloadExtensions();
+        binding.tabGroup.check(R.id.tabConsole);
         Notify.show(R.string.web_home_extension_source_saved);
     }
 
@@ -323,15 +324,9 @@ public class WebHomeExtensionDebugDialog extends BaseAlertDialog implements Home
         controller.evaluate("""
                 (function(){
                   const active=document.activeElement;
-                  const HTML_LIMIT=1000000;
-                  const TEXT_LIMIT=200000;
-                  const clip=function(value,limit){
-                    value=String(value||'');
-                    return value.length>limit?value.slice(0,limit)+'\\n...truncated '+(value.length-limit)+' chars':value;
-                  };
                   const path=function(el){
                     const arr=[];
-                    for(let n=el;n&&n.nodeType===1&&arr.length<16;n=n.parentElement){
+                    for(let n=el;n&&n.nodeType===1&&arr.length<10;n=n.parentElement){
                       let s=n.tagName.toLowerCase();
                       if(n.id)s+='#'+n.id;
                       if(n.className&&typeof n.className==='string')s+='.'+n.className.trim().split(/\\s+/).slice(0,3).join('.');
@@ -339,15 +334,15 @@ public class WebHomeExtensionDebugDialog extends BaseAlertDialog implements Home
                     }
                     return arr.join(' > ');
                   };
-                  const html=document.documentElement&&document.documentElement.outerHTML||'';
-                  const nodes=Array.prototype.slice.call(document.querySelectorAll('body *'),0,600).map(function(n){
+                  const htmlLength=(document.documentElement&&document.documentElement.outerHTML||'').length;
+                  const nodes=Array.prototype.slice.call(document.querySelectorAll('body *'),0,220).map(function(n){
                     const rect=n.getBoundingClientRect();
                     const depth=(function(el){let d=0;for(let p=el.parentElement;p&&d<20;p=p.parentElement)d++;return d;})(n);
                     const attrs=[];
-                    for(let i=0;i<n.attributes.length&&i<16;i++){
+                    for(let i=0;i<n.attributes.length&&i<8;i++){
                       const a=n.attributes[i];
                       if(a.name==='class'||a.name==='id')continue;
-                      attrs.push(a.name+'="'+String(a.value).slice(0,300)+'"');
+                      attrs.push(a.name+'="'+String(a.value).slice(0,120)+'"');
                     }
                     return {
                       depth:depth,
@@ -355,20 +350,19 @@ public class WebHomeExtensionDebugDialog extends BaseAlertDialog implements Home
                       id:n.id||'',
                       className:typeof n.className==='string'?n.className:'',
                       attrs:attrs.join(' '),
-                      text:(n.innerText||n.textContent||'').trim().replace(/\\s+/g,' ').slice(0,500),
+                      text:(n.innerText||n.textContent||'').trim().replace(/\\s+/g,' ').slice(0,160),
                       x:Math.round(rect.left),y:Math.round(rect.top),w:Math.round(rect.width),h:Math.round(rect.height)
                     };
-                  }).filter(function(n){return n.w>0&&n.h>0;}).slice(0,300);
+                  }).filter(function(n){return n.w>0&&n.h>0;}).slice(0,120);
                   return JSON.stringify({
                     title:document.title,
                     url:location.href,
                     readyState:document.readyState,
                     active:active?path(active):'',
                     selected:window.__fmInspectLast||null,
-                    bodyText:clip((document.body&&document.body.innerText||'').trim(),TEXT_LIMIT),
-                    html:clip(html,HTML_LIMIT),
-                    htmlLength:html.length,
-                    htmlTruncated:html.length>HTML_LIMIT,
+                    bodyTextPreview:(document.body&&document.body.innerText||'').trim().replace(/\\s+/g,' ').slice(0,1200),
+                    htmlLength:htmlLength,
+                    totalElements:document.querySelectorAll('body *').length,
                     elements:nodes
                   },null,2);
                 })();
@@ -386,6 +380,9 @@ public class WebHomeExtensionDebugDialog extends BaseAlertDialog implements Home
             builder.append("URL: ").append(safe(object, "url")).append('\n');
             builder.append("Ready: ").append(safe(object, "readyState")).append('\n');
             builder.append("Active: ").append(safe(object, "active")).append("\n\n");
+            builder.append("HTML chars: ").append(safe(object, "htmlLength")).append('\n');
+            builder.append("Elements total: ").append(safe(object, "totalElements")).append('\n');
+            builder.append("Showing visible nodes: max 120. Use Inspect Element to view a node snippet.\n\n");
             if (object.has("selected") && object.get("selected").isJsonObject()) {
                 JsonObject selected = object.getAsJsonObject("selected");
                 builder.append("Selected\n");
@@ -398,10 +395,7 @@ public class WebHomeExtensionDebugDialog extends BaseAlertDialog implements Home
             builder.append("DOM\n");
             JsonArray elements = object.getAsJsonArray("elements");
             if (elements != null) for (JsonElement element : elements) appendElement(builder, element.getAsJsonObject());
-            builder.append("\nBody Text\n").append(safe(object, "bodyText")).append("\n\n");
-            builder.append("HTML");
-            if ("true".equals(safe(object, "htmlTruncated"))) builder.append(" (truncated, total chars ").append(safe(object, "htmlLength")).append(')');
-            builder.append("\n").append(safe(object, "html")).append('\n');
+            builder.append("\nBody Text Preview\n").append(safe(object, "bodyTextPreview")).append('\n');
             return builder.toString();
         } catch (Throwable e) {
             return builder.append(unquote(value)).toString();
