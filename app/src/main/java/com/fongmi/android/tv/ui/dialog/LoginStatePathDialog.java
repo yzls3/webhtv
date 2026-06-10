@@ -14,7 +14,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
-import android.widget.EditText;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -30,6 +29,7 @@ import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.databinding.AdapterLoginStateTreeBinding;
 import com.fongmi.android.tv.databinding.DialogLoginStatePathBinding;
 import com.fongmi.android.tv.ui.custom.SpaceItemDecoration;
+import com.fongmi.android.tv.ui.custom.SafeScrollEditText;
 import com.fongmi.android.tv.utils.FileUtil;
 import com.fongmi.android.tv.utils.Formatters;
 import com.fongmi.android.tv.utils.LoginStateSync;
@@ -402,7 +402,7 @@ public class LoginStatePathDialog extends BaseAlertDialog {
 
     private void showEditor(String path, String content) {
         if (editor != null && editor.isShowing()) editor.dismiss();
-        EditText input = new EditText(requireContext());
+        SafeScrollEditText input = new SafeScrollEditText(requireContext());
         input.setText(content, TextView.BufferType.EDITABLE);
         input.setSelectAllOnFocus(false);
         input.setSingleLine(false);
@@ -413,10 +413,6 @@ public class LoginStatePathDialog extends BaseAlertDialog {
         input.setPadding(ResUtil.dp2px(10), ResUtil.dp2px(10), ResUtil.dp2px(10), ResUtil.dp2px(10));
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         input.setGravity(Gravity.START | Gravity.TOP);
-        input.setHorizontalScrollBarEnabled(true);
-        input.setVerticalScrollBarEnabled(true);
-        input.setScrollbarFadingEnabled(false);
-        input.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
         input.setBackground(editorBackground());
         input.setOnTouchListener((view, event) -> {
             int action = event.getActionMasked();
