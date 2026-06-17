@@ -51,6 +51,7 @@ public class SettingClipboardOverlay {
     private static final List<String> HISTORY = new ArrayList<>();
     private static int savedTriggerLeft = -1;
     private static int savedTriggerTop = -1;
+    private static boolean triggerMovedByUser;
 
     private final Activity activity;
     private final DialogFragment fragment;
@@ -81,6 +82,7 @@ public class SettingClipboardOverlay {
     private float downRawY;
     private int downLeft;
     private int downTop;
+    private int panelHeight;
 
     private SettingClipboardOverlay(Activity activity, DialogFragment fragment, View root, ViewGroup host) {
         this.activity = activity;
@@ -193,7 +195,7 @@ public class SettingClipboardOverlay {
         if (trigger == null || panel == null || list == null) return;
         trigger.setChecked(expanded);
         if (expanded) {
-            showDialog(panelDialog, Gravity.BOTTOM | Gravity.START, 0, navigationBarHeight());
+            showDialog(panelDialog, Gravity.BOTTOM | Gravity.START, 0, panelBottomOffset());
             host.post(() -> {
                 updatePanelSize();
                 updateDialogAvoidance();
@@ -332,15 +334,15 @@ public class SettingClipboardOverlay {
                 dragging = false;
                 downRawX = event.getRawX();
                 downRawY = event.getRawY();
-                downLeft = savedTriggerLeft >= 0 ? savedTriggerLeft : 0;
-                downTop = savedTriggerTop >= 0 ? savedTriggerTop : statusBarHeight() + dp(8);
+                downLeft = triggerMovedByUser && savedTriggerLeft >= 0 ? savedTriggerLeft : defaultTriggerLeft();
+                downTop = triggerMovedByUser && savedTriggerTop >= 0 ? savedTriggerTop : defaultTriggerTop();
                 return false;
             case MotionEvent.ACTION_MOVE:
                 int dx = Math.round(event.getRawX() - downRawX);
                 int dy = Math.round(event.getRawY() - downRawY);
                 if (!dragging && Math.abs(dx) < dp(4) && Math.abs(dy) < dp(4)) return false;
                 dragging = true;
-                moveTrigger(downLeft + dx, downTop + dy);
+                moveTrigger(downLeft + dx, downTop + dy, true);
                 return true;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
@@ -354,30 +356,14 @@ public class SettingClipboardOverlay {
 
     private void placeTrigger(boolean forceDefault) {
         if (triggerDialog == null || host.getWidth() == 0) return;
-        if (!forceDefault && savedTriggerLeft >= 0 && savedTriggerTop >= 0) {
-            moveTrigger(savedTriggerLeft, savedTriggerTop);
+        if (!forceDefault && triggerMovedByUser && savedTriggerLeft >= 0 && savedTriggerTop >= 0) {
+            moveTrigger(savedTriggerLeft, savedTriggerTop, false);
             return;
         }
-        int width = dp(42);
-        int height = dp(40);
-        int left = host.getWidth() - width - dp(12);
-        int top = statusBarHeight() + dp(8);
-        Rect rect = new Rect(left, top, left + width, top + height);
-        if (overlapsClickable(root, rect)) {
-            int candidateLeft = dp(12);
-            Rect candidate = new Rect(candidateLeft, top, candidateLeft + width, top + height);
-            if (!overlapsClickable(root, candidate)) left = candidateLeft;
-            else {
-                int maxTop = Math.max(statusBarHeight() + dp(8), host.getHeight() - height - navigationBarHeight() - dp(12));
-                while (top < maxTop && overlapsClickable(root, new Rect(left, top, left + width, top + height))) {
-                    top += height + dp(8);
-                }
-            }
-        }
-        moveTrigger(left, top);
+        moveTrigger(defaultTriggerLeft(), defaultTriggerTop(), false);
     }
 
-    private void moveTrigger(int left, int top) {
+    private void moveTrigger(int left, int top, boolean persist) {
         if (triggerDialog == null || host.getWidth() == 0 || host.getHeight() == 0) return;
         int width = dp(42);
         int height = dp(40);
@@ -386,52 +372,52 @@ public class SettingClipboardOverlay {
         int safeLeft = Math.max(dp(4), Math.min(left, maxLeft));
         int safeTop = Math.max(statusBarHeight() + dp(4), Math.min(top, maxTop));
         updateWindow(triggerDialog, Gravity.TOP | Gravity.START, safeLeft, safeTop, width, height);
-        savedTriggerLeft = safeLeft;
-        savedTriggerTop = safeTop;
+        if (persist) {
+            savedTriggerLeft = safeLeft;
+            savedTriggerTop = safeTop;
+            triggerMovedByUser = true;
+        }
     }
 
-    private boolean overlapsClickable(View view, Rect target) {
-        if (view == null || view.getVisibility() != View.VISIBLE) return false;
-        if (view != root && (view.isClickable() || view.isLongClickable())) {
-            Rect rect = new Rect();
-            if (view.getGlobalVisibleRect(rect) && Rect.intersects(rect, target)) return true;
-        }
-        if (!(view instanceof ViewGroup)) return false;
-        ViewGroup group = (ViewGroup) view;
-        for (int i = 0; i < group.getChildCount(); i++) {
-            if (overlapsClickable(group.getChildAt(i), target)) return true;
-        }
-        return false;
+    private int defaultTriggerLeft() {
+        return host.getWidth() - dp(156);
+    }
+
+    private int defaultTriggerTop() {
+        return statusBarHeight() + dp(42);
     }
 
     private void updatePanelSize() {
         if (panel == null || scroll == null || host.getHeight() == 0) return;
         int target = Math.min(dp(320), Math.max(dp(220), host.getHeight() * 42 / 100));
+        panelHeight = target;
         ViewGroup.LayoutParams scrollParams = scroll.getLayoutParams();
         int scrollHeight = Math.max(dp(150), target - dp(58));
         if (scrollParams.height != scrollHeight) {
             scrollParams.height = scrollHeight;
             scroll.setLayoutParams(scrollParams);
         }
-        updateWindow(panelDialog, Gravity.BOTTOM | Gravity.START, 0, navigationBarHeight(), ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        updateWindow(panelDialog, Gravity.BOTTOM | Gravity.START, 0, panelBottomOffset(), ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private void updateDialogAvoidance() {
         if (!expanded || panel == null || fragment.getDialog() == null || fragment.getDialog().getWindow() == null) return;
         View dialog = fragment.getDialog().getWindow().getDecorView();
-        Rect panelRect = new Rect();
-        if (!panel.getGlobalVisibleRect(panelRect)) return;
+        Rect dialogRect = new Rect();
+        if (!dialog.getGlobalVisibleRect(dialogRect)) return;
+        int panelTop = panelTop();
         EditText input = activeInput();
-        Rect target = new Rect();
-        boolean hasInput = input != null && input.getGlobalVisibleRect(target);
-        if (!hasInput && !dialog.getGlobalVisibleRect(target)) return;
-        int overlap = target.bottom - panelRect.top + dp(14);
+        Rect inputRect = new Rect();
+        boolean hasInput = input != null && input.getGlobalVisibleRect(inputRect);
+        int overlap = Math.max(0, dialogRect.bottom - panelTop + dp(14));
+        if (hasInput) overlap = Math.max(overlap, inputRect.bottom - panelTop + dp(18));
         if (overlap <= 0) {
             dialog.animate().translationY(0).setDuration(140).start();
             return;
         }
-        int safeTop = statusBarHeight() + dp(12);
-        int maxShift = hasInput ? Math.max(0, target.top - safeTop) : Math.max(0, target.top - safeTop);
+        int safeTop = statusBarHeight() + dp(8);
+        int maxShift = Math.max(0, dialogRect.top - safeTop);
+        if (hasInput) maxShift = Math.max(maxShift, Math.max(0, inputRect.top - safeTop));
         int shift = Math.min(overlap, maxShift);
         dialog.animate().translationY(-shift).setDuration(160).start();
     }
@@ -484,7 +470,7 @@ public class SettingClipboardOverlay {
     private void prepareWindow(Window window, int width, int height) {
         window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-        window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+        window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL);
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         window.setLayout(width, height);
     }
@@ -606,5 +592,14 @@ public class SettingClipboardOverlay {
     private int navigationBarHeight() {
         int id = root.getResources().getIdentifier("navigation_bar_height", "dimen", "android");
         return id > 0 ? root.getResources().getDimensionPixelSize(id) : dp(8);
+    }
+
+    private int panelBottomOffset() {
+        return 0;
+    }
+
+    private int panelTop() {
+        int height = panelHeight > 0 ? panelHeight : Math.min(dp(320), Math.max(dp(220), host.getHeight() * 42 / 100));
+        return Math.max(statusBarHeight() + dp(80), host.getHeight() - height - panelBottomOffset());
     }
 }
