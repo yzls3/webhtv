@@ -26,6 +26,7 @@ import androidx.core.widget.NestedScrollView;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.utils.Notify;
 import com.fongmi.android.tv.utils.ResUtil;
+import com.fongmi.android.tv.utils.Util;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.checkbox.MaterialCheckBox;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -66,6 +67,7 @@ public class SettingClipboardOverlay {
     }
 
     public static SettingClipboardOverlay attach(DialogFragment fragment, View root) {
+        if (!Util.isMobile()) return null;
         SettingClipboardOverlay overlay = new SettingClipboardOverlay(fragment, root);
         overlay.attach();
         return overlay;
