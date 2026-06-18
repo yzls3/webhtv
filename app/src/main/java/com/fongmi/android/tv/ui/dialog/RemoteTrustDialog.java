@@ -587,7 +587,7 @@ public final class RemoteTrustDialog {
             return;
         }
         for (DeviceRow row : rows) {
-            MaterialButton item = deviceButton(context, deviceText(context, profile, row.group, row.device), row.device.online);
+            MaterialButton item = deviceButton(context, deviceText(context, profile, row.device), row.device);
             bindAction(binding, item);
             item.setOnClickListener(v -> {
                 binding.selectedGroupId = row.group.groupId;
@@ -702,7 +702,7 @@ public final class RemoteTrustDialog {
         for (DeviceRow row : rows) {
             LinearLayoutCompat item = card(context);
             LinearLayoutCompat line = row(context);
-            MaterialTextView text = text(context, deviceText(context, profile, row.group, row.device), 12, "#3C4043", false);
+            MaterialTextView text = text(context, deviceText(context, profile, row.device), 12, "#3C4043", false);
             text.setMaxLines(2);
             text.setEllipsize(TextUtils.TruncateAt.END);
             line.addView(text, weight());
@@ -2642,8 +2642,8 @@ public final class RemoteTrustDialog {
         return "";
     }
 
-    private static String deviceText(Context context, RemoteProfile profile, RemoteGroup group, RemoteDevice device) {
-        return deviceName(device) + " · " + deviceRole(context, profile, device) + " · " + deviceState(context, device) + deviceTime(device) + "\n" + groupName(context, group) + " · " + shortId(device.deviceId);
+    private static String deviceText(Context context, RemoteProfile profile, RemoteDevice device) {
+        return deviceName(device) + " · " + deviceRole(context, profile, device) + " · " + deviceTypeText(context, device);
     }
 
     private static String deviceDetailText(Context context, RemoteProfile profile, RemoteGroup group, RemoteDevice device) {
@@ -2661,6 +2661,16 @@ public final class RemoteTrustDialog {
 
     private static String deviceState(Context context, RemoteDevice device) {
         return device.online ? context.getString(R.string.remote_trust_device_online) : context.getString(R.string.remote_trust_device_offline);
+    }
+
+    private static String deviceTypeText(Context context, RemoteDevice device) {
+        if (device.type == 0) return context.getString(R.string.sync_device_tv);
+        if (device.type == 1) return context.getString(R.string.sync_device_mobile);
+        return context.getString(R.string.remote_trust_sync_device);
+    }
+
+    private static int deviceTypeIcon(RemoteDevice device) {
+        return device.type == 0 ? R.drawable.ic_sync_tv : R.drawable.ic_sync_phone;
     }
 
     private static String deviceTime(RemoteDevice device) {
@@ -3155,9 +3165,14 @@ public final class RemoteTrustDialog {
         return button;
     }
 
-    private static MaterialButton deviceButton(Context context, String text, boolean online) {
+    private static MaterialButton deviceButton(Context context, String text, RemoteDevice device) {
         MaterialButton button = listButton(context, text);
-        applyDeviceStyle(context, button, online);
+        applyDeviceStyle(context, button, device.online);
+        button.setIconResource(deviceTypeIcon(device));
+        button.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_START);
+        button.setIconPadding(dp(context, 8));
+        button.setIconSize(dp(context, 18));
+        button.setIconTint(ColorStateList.valueOf(Color.parseColor(device.online ? "#137333" : "#B3261E")));
         return button;
     }
 
