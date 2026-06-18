@@ -99,10 +99,13 @@ public final class RemoteTrustDialog {
     private static final int HOME_STATUS_SETTING = 1;
     private static final int HOME_STATUS_SUCCESS = 2;
     private static final int HOME_STATUS_FAILED = 3;
+    private static final Object REMOTE_SYNC_LOCK = new Object();
+    private static final int REMOTE_SYNC_STEPS = 5;
     private static WeakReference<FragmentActivity> scanActivity;
     private static WeakReference<Binding> scanBinding;
     private static WeakReference<FragmentActivity> activeActivity;
     private static WeakReference<Binding> activeBinding;
+    private static RemoteSyncUiState remoteSyncState = new RemoteSyncUiState();
 
     private RemoteTrustDialog() {
     }
@@ -609,6 +612,8 @@ public final class RemoteTrustDialog {
             renderDevices(context, binding);
             return;
         }
+        String syncResult = remoteSyncResultFor(profile, row);
+        if (!TextUtils.isEmpty(syncResult)) binding.lastResult = syncResult;
         LinearLayoutCompat top = row(context);
         MaterialButton deviceStatus = statusButton(context, deviceName(row.device) + " · " + deviceState(context, row.device) + " · " + deviceRole(context, profile, row.device));
         applyDeviceStyle(context, deviceStatus, row.device.online);
@@ -642,7 +647,10 @@ public final class RemoteTrustDialog {
 
         LinearLayoutCompat row2 = row(context);
         MaterialButton config = tonalAction(binding, context, R.string.remote_trust_action_config);
-        MaterialButton sync = primaryAction(binding, context, R.string.remote_trust_action_sync);
+        boolean syncRunning = remoteSyncRunningFor(profile, row);
+        MaterialButton sync = primary(context, context.getString(syncRunning ? R.string.remote_trust_sync_running : R.string.remote_trust_action_sync));
+        if (syncRunning) sync.setEnabled(false);
+        else bindAction(binding, sync);
         config.setOnClickListener(v -> showConfigDialog((FragmentActivity) context, binding));
         sync.setOnClickListener(v -> confirmRemoteSync((FragmentActivity) context, binding));
         row2.addView(config, weight());
@@ -2048,6 +2056,12 @@ public final class RemoteTrustDialog {
             Notify.show(R.string.remote_trust_no_device_selected);
             return;
         }
+        if (remoteSyncRunningFor(profile, selected)) {
+            binding.page = PAGE_DETAIL;
+            binding.lastResult = remoteSyncResultFor(profile, selected);
+            render(activity, binding);
+            return;
+        }
         if (TextUtils.equals(profile.deviceId, selected.device.deviceId)) {
             Notify.show(R.string.remote_trust_sync_self_forbidden);
             return;
@@ -2068,7 +2082,9 @@ public final class RemoteTrustDialog {
         }
         setBusy(binding, true);
         binding.page = PAGE_DETAIL;
-        binding.lastResult = activity.getString(R.string.remote_trust_sync_state_creating);
+        JsonObject creating = syncStatus("creating");
+        binding.lastResult = formatSyncProgress(activity, selected, creating, false);
+        rememberRemoteSync(profile, selected, "", binding.lastResult, syncStep(creating, false), true);
         render(activity, binding);
         Task.execute(() -> {
             try {
@@ -2078,28 +2094,25 @@ public final class RemoteTrustDialog {
                 JsonObject sync = object(response, "sync");
                 String syncId = safe(sync, "id");
                 if (TextUtils.isEmpty(syncId)) throw new IllegalStateException(activity.getString(R.string.remote_trust_sync_missing_id));
-                postSyncProgress(activity, binding, formatSyncProgress(activity, selected, sync, false), true);
+                postSyncProgress(activity, binding, profile, selected, syncId, sync, false, true);
                 boolean done = isSyncTerminal(sync);
                 for (int i = 0; i < 60 && !done; i++) {
                     Thread.sleep(i == 0 ? 1200 : 2000);
                     JsonObject detail = client.getSync(selected.group, syncId);
                     sync = object(detail, "sync");
                     done = isSyncTerminal(sync);
-                    postSyncProgress(activity, binding, formatSyncProgress(activity, selected, sync, false), true);
+                    postSyncProgress(activity, binding, profile, selected, syncId, sync, false, true);
                 }
-                postSyncProgress(activity, binding, formatSyncProgress(activity, selected, sync, !done), false);
+                postSyncProgress(activity, binding, profile, selected, syncId, sync, !done, false);
             } catch (Throwable e) {
-                App.post(() -> {
-                    setBusy(binding, false);
-                    binding.lastResult = activity.getString(R.string.remote_trust_sync_state_failed) + "\n" + empty(e.getMessage());
-                    Notify.show(e.getMessage());
-                    render(activity, binding);
-                });
+                failRemoteSync(activity, binding, profile, selected, e);
             }
         });
     }
 
-    private static void postSyncProgress(FragmentActivity activity, Binding binding, String result, boolean busy) {
+    private static void postSyncProgress(FragmentActivity activity, Binding binding, RemoteProfile profile, DeviceRow selected, String syncId, JsonObject sync, boolean timeout, boolean busy) {
+        String result = formatSyncProgress(App.get(), selected, sync, timeout);
+        rememberRemoteSync(profile, selected, syncId, result, syncStep(sync, timeout), busy);
         App.post(() -> {
             if (binding.dialog == null || !binding.dialog.isShowing()) return;
             setBusy(binding, busy);
@@ -2109,9 +2122,29 @@ public final class RemoteTrustDialog {
         });
     }
 
+    private static void failRemoteSync(FragmentActivity activity, Binding binding, RemoteProfile profile, DeviceRow selected, Throwable e) {
+        JsonObject failed = syncStatus("failed");
+        failed.addProperty("message", empty(e.getMessage()));
+        String result = formatSyncProgress(App.get(), selected, failed, false);
+        rememberRemoteSync(profile, selected, "", result, syncStep(failed, false), false);
+        App.post(() -> {
+            setBusy(binding, false);
+            binding.page = PAGE_DETAIL;
+            binding.lastResult = result;
+            Notify.show(e.getMessage());
+            if (binding.dialog != null && binding.dialog.isShowing()) render(activity, binding);
+        });
+    }
+
     private static boolean isSyncTerminal(JsonObject sync) {
         String status = safe(sync, "status");
         return TextUtils.equals(status, "done") || status.endsWith("_failed") || resultFailed(sync, "exportResult") || resultFailed(sync, "restoreResult");
+    }
+
+    private static JsonObject syncStatus(String status) {
+        JsonObject object = new JsonObject();
+        object.addProperty("status", status);
+        return object;
     }
 
     private static boolean resultFailed(JsonObject sync, String key) {
@@ -2121,7 +2154,12 @@ public final class RemoteTrustDialog {
 
     private static String formatSyncProgress(Context context, DeviceRow selected, JsonObject sync, boolean timeout) {
         StringBuilder builder = new StringBuilder();
+        int step = syncStep(sync, timeout);
+        boolean failed = syncFailed(sync, timeout);
         builder.append(context.getString(R.string.remote_trust_action_sync));
+        builder.append('\n').append(context.getString(R.string.remote_trust_sync_progress, step, REMOTE_SYNC_STEPS));
+        builder.append('\n').append(context.getString(R.string.remote_trust_sync_background_hint));
+        builder.append('\n').append(syncStepLines(context, step, failed));
         builder.append('\n').append(context.getString(R.string.remote_trust_result_status)).append(": ").append(syncStateText(context, sync, timeout));
         builder.append('\n').append(context.getString(R.string.remote_trust_sync_device)).append(": ").append(deviceName(selected.device));
         if (!TextUtils.isEmpty(safe(sync, "id"))) builder.append('\n').append(context.getString(R.string.remote_trust_sync_task)).append(": ").append(shortId(safe(sync, "id")));
@@ -2134,10 +2172,46 @@ public final class RemoteTrustDialog {
         return builder.toString();
     }
 
+    private static int syncStep(JsonObject sync, boolean timeout) {
+        if (timeout || syncFailed(sync, false)) return Math.max(1, Math.min(REMOTE_SYNC_STEPS, syncStepByStatus(safe(sync, "status"))));
+        return syncStepByStatus(safe(sync, "status"));
+    }
+
+    private static int syncStepByStatus(String status) {
+        if (TextUtils.equals(status, "done")) return 5;
+        if (status.contains("restore")) return 4;
+        if (TextUtils.equals(status, "exported")) return 4;
+        if (status.contains("export") || status.contains("upload")) return 3;
+        if (TextUtils.equals(status, "exporting")) return 3;
+        if (TextUtils.equals(status, "created")) return 2;
+        return 1;
+    }
+
+    private static boolean syncFailed(JsonObject sync, boolean timeout) {
+        return timeout || resultFailed(sync, "exportResult") || resultFailed(sync, "restoreResult") || safe(sync, "status").endsWith("_failed") || TextUtils.equals(safe(sync, "status"), "failed");
+    }
+
+    private static String syncStepLines(Context context, int current, boolean failed) {
+        StringBuilder builder = new StringBuilder();
+        addSyncStepLine(context, builder, 1, current, failed, R.string.remote_trust_sync_step_create);
+        addSyncStepLine(context, builder, 2, current, failed, R.string.remote_trust_sync_step_export);
+        addSyncStepLine(context, builder, 3, current, failed, R.string.remote_trust_sync_step_upload);
+        addSyncStepLine(context, builder, 4, current, failed, R.string.remote_trust_sync_step_restore);
+        addSyncStepLine(context, builder, 5, current, failed, R.string.remote_trust_sync_step_finish);
+        return builder.toString();
+    }
+
+    private static void addSyncStepLine(Context context, StringBuilder builder, int step, int current, boolean failed, int name) {
+        if (builder.length() > 0) builder.append('\n');
+        int state = step < current ? R.string.remote_trust_sync_step_done : step == current ? (failed ? R.string.remote_trust_sync_step_failed : R.string.remote_trust_sync_step_current) : R.string.remote_trust_sync_step_pending;
+        builder.append(context.getString(R.string.remote_trust_sync_step_line, step, context.getString(name), context.getString(state)));
+    }
+
     private static String syncStateText(Context context, JsonObject sync, boolean timeout) {
         if (timeout) return context.getString(R.string.remote_trust_sync_state_timeout);
-        if (resultFailed(sync, "exportResult") || resultFailed(sync, "restoreResult") || safe(sync, "status").endsWith("_failed")) return context.getString(R.string.remote_trust_sync_state_failed);
+        if (syncFailed(sync, false)) return context.getString(R.string.remote_trust_sync_state_failed);
         String status = safe(sync, "status");
+        if (TextUtils.equals(status, "creating")) return context.getString(R.string.remote_trust_sync_state_creating);
         if (TextUtils.equals(status, "done")) return context.getString(R.string.remote_trust_sync_state_done);
         if (TextUtils.equals(status, "exported")) return context.getString(R.string.remote_trust_sync_state_exported);
         if (TextUtils.equals(status, "exporting")) return context.getString(R.string.remote_trust_sync_state_exporting);
@@ -2145,9 +2219,11 @@ public final class RemoteTrustDialog {
     }
 
     private static String syncMessage(JsonObject sync) {
+        String message = safe(sync, "message");
+        if (!TextUtils.isEmpty(message)) return message;
         JsonObject export = object(sync, "exportResult");
         JsonObject restore = object(sync, "restoreResult");
-        String message = safe(restore, "message");
+        message = safe(restore, "message");
         if (TextUtils.isEmpty(message)) message = safe(export, "message");
         return message;
     }
@@ -2174,6 +2250,40 @@ public final class RemoteTrustDialog {
         if (part.size() == 0) return;
         long size = longValue(part, "size");
         result.add(context.getString(label) + (size > 0 ? " " + formatBytes(size) : ""));
+    }
+
+    private static void rememberRemoteSync(RemoteProfile profile, DeviceRow selected, String syncId, String result, int step, boolean running) {
+        if (profile == null || selected == null || selected.group == null || selected.device == null) return;
+        synchronized (REMOTE_SYNC_LOCK) {
+            remoteSyncState.serverOrigin = profile.serverOrigin;
+            remoteSyncState.groupId = selected.group.groupId;
+            remoteSyncState.targetDeviceId = selected.device.deviceId;
+            remoteSyncState.targetName = deviceName(selected.device);
+            remoteSyncState.syncId = syncId;
+            remoteSyncState.result = result;
+            remoteSyncState.step = step;
+            remoteSyncState.running = running;
+            remoteSyncState.updatedAt = System.currentTimeMillis();
+        }
+    }
+
+    private static String remoteSyncResultFor(RemoteProfile profile, DeviceRow selected) {
+        synchronized (REMOTE_SYNC_LOCK) {
+            return sameRemoteSync(profile, selected) ? remoteSyncState.result : "";
+        }
+    }
+
+    private static boolean remoteSyncRunningFor(RemoteProfile profile, DeviceRow selected) {
+        synchronized (REMOTE_SYNC_LOCK) {
+            return sameRemoteSync(profile, selected) && remoteSyncState.running;
+        }
+    }
+
+    private static boolean sameRemoteSync(RemoteProfile profile, DeviceRow selected) {
+        return profile != null && selected != null && selected.group != null && selected.device != null
+                && TextUtils.equals(remoteSyncState.serverOrigin, profile.serverOrigin)
+                && TextUtils.equals(remoteSyncState.groupId, selected.group.groupId)
+                && TextUtils.equals(remoteSyncState.targetDeviceId, selected.device.deviceId);
     }
 
     private static void sendCommand(FragmentActivity activity, Binding binding, String type, JsonObject payload) {
@@ -3182,6 +3292,18 @@ public final class RemoteTrustDialog {
 
     private interface CommandErrorHandler {
         void handle(Throwable e);
+    }
+
+    private static final class RemoteSyncUiState {
+        private String serverOrigin = "";
+        private String groupId = "";
+        private String targetDeviceId = "";
+        private String targetName = "";
+        private String syncId = "";
+        private String result = "";
+        private int step;
+        private boolean running;
+        private long updatedAt;
     }
 
     private static final class ConfigDialogState {
