@@ -2198,9 +2198,11 @@
       bottom: 0;
       background:
         linear-gradient(180deg, rgba(4, 8, 12, 0) 0%, rgba(4, 8, 12, 0) 54%, rgba(5, 10, 15, .3) 76%, #081016 100%),
+        var(--detail-hero-bg, none),
         var(--detail-hero-bg, none);
-      background-size: cover;
-      background-position: center top;
+      background-size: cover, var(--detail-hero-size, cover), cover;
+      background-position: center, var(--detail-hero-position, center top), center top;
+      background-repeat: no-repeat, no-repeat, no-repeat;
       filter: brightness(1) saturate(1.05);
       opacity: 1;
     }
@@ -9316,7 +9318,16 @@ nsec: ${state.identity.nsec}` : "身份未就绪";
       cover.dataset.coverMode = usePoster ? "poster" : "landscape";
       cover.style.setProperty("--detail-cover-bg", bgSrc ? `url("${cssUrl(bgSrc)}")` : "none");
       const sheet = $("detailSheet");
-      if (sheet) sheet.style.setProperty("--detail-hero-bg", bgSrc ? `url("${cssUrl(bgSrc)}")` : "none");
+      if (sheet) {
+        sheet.style.setProperty("--detail-hero-bg", bgSrc ? `url("${cssUrl(bgSrc)}")` : "none");
+        if (usePoster) {
+          sheet.style.setProperty("--detail-hero-size", "cover");
+          sheet.style.setProperty("--detail-hero-position", "center top");
+        } else {
+          sheet.style.setProperty("--detail-hero-size", "auto 62vh");
+          sheet.style.setProperty("--detail-hero-position", "center top");
+        }
+      }
       if (src) {
         const nextSrc = opts.preloadedSrc || bgSrc;
         const applyLoaded = () => {
