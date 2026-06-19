@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.fongmi.android.tv.api.config.VodConfig;
 import com.fongmi.android.tv.bean.Site;
 import com.fongmi.android.tv.databinding.AdapterSiteBinding;
+import com.fongmi.android.tv.databinding.AdapterSiteSwitchBinding;
 import com.fongmi.android.tv.setting.Setting;
 import com.fongmi.android.tv.setting.SiteHealthStore;
 import com.github.catvod.crawler.SpiderDebug;
@@ -22,11 +23,15 @@ import java.util.Locale;
 
 public class SiteAdapter extends RecyclerView.Adapter<SiteAdapter.ViewHolder> {
 
+    private static final int TYPE_SWITCH = 0;
+    private static final int TYPE_ACTION = 1;
+
     private final OnClickListener listener;
     private final List<Site> allItems;
     private final List<Site> mItems;
     private final long adapterStart;
     private boolean firstBindLogged;
+    private int displayLimit = Integer.MAX_VALUE;
     private int type;
 
     public SiteAdapter(OnClickListener listener) {
@@ -34,6 +39,7 @@ public class SiteAdapter extends RecyclerView.Adapter<SiteAdapter.ViewHolder> {
         this.listener = listener;
         this.allItems = new ArrayList<>();
         this.mItems = new ArrayList<>();
+        setHasStableIds(true);
         this.addAll();
         log("created total=%sms items=%s", cost(), mItems.size());
     }
@@ -44,14 +50,17 @@ public class SiteAdapter extends RecyclerView.Adapter<SiteAdapter.ViewHolder> {
     }
 
     public void setType(int type) {
+        int oldViewType = getViewType();
         this.type = type;
-        notifyDataSetChanged();
+        if (oldViewType != getViewType()) notifyDataSetChanged();
+        else notifyItemRangeChanged(0, getItemCount());
     }
 
     public void filter(String keyword) {
         String text = keyword == null ? "" : keyword.trim().toLowerCase(Locale.getDefault());
         mItems.clear();
         for (Site site : allItems) if (text.isEmpty() || site.getName().toLowerCase(Locale.getDefault()).contains(text) || site.getKey().toLowerCase(Locale.getDefault()).contains(text)) mItems.add(site);
+        displayLimit = Integer.MAX_VALUE;
         notifyDataSetChanged();
     }
 
@@ -79,15 +88,43 @@ public class SiteAdapter extends RecyclerView.Adapter<SiteAdapter.ViewHolder> {
         return mItems;
     }
 
+    public int getTotalCount() {
+        return mItems.size();
+    }
+
+    public void setDisplayLimit(int displayLimit) {
+        this.displayLimit = Math.max(1, displayLimit);
+    }
+
+    public void showAll() {
+        int before = getItemCount();
+        displayLimit = Integer.MAX_VALUE;
+        int after = getItemCount();
+        if (after > before) notifyItemRangeInserted(before, after - before);
+    }
+
     @Override
     public int getItemCount() {
-        return mItems.size();
+        return Math.min(mItems.size(), displayLimit);
+    }
+
+    @Override
+    public long getItemId(int position) {
+        if (position < 0 || position >= mItems.size()) return RecyclerView.NO_ID;
+        String key = mItems.get(position).getKey();
+        return key == null ? position : key.hashCode();
+    }
+
+    @Override
+    public int getItemViewType(int position) {
+        return getViewType();
     }
 
     @NonNull
     @Override
     public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        return new ViewHolder(AdapterSiteBinding.inflate(LayoutInflater.from(parent.getContext()), parent, false));
+        LayoutInflater inflater = LayoutInflater.from(parent.getContext());
+        return viewType == TYPE_ACTION ? new ViewHolder(AdapterSiteBinding.inflate(inflater, parent, false)) : new ViewHolder(AdapterSiteSwitchBinding.inflate(inflater, parent, false));
     }
 
     @Override
@@ -97,16 +134,7 @@ public class SiteAdapter extends RecyclerView.Adapter<SiteAdapter.ViewHolder> {
             firstBindLogged = true;
             log("first bind position=%s name=%s total=%sms", position, item.getName(), cost());
         }
-        holder.binding.text.setText(item.getName());
-        holder.binding.health.setBackgroundTintList(ColorStateList.valueOf(SiteHealthStore.getColor(item)));
-        holder.binding.check.setChecked(getChecked(item));
-        holder.binding.text.setSelected(item.isSelected());
-        holder.binding.getRoot().setSelected(item.isSelected());
-        holder.binding.getRoot().setOnFocusChangeListener((v, hasFocus) -> holder.binding.text.setSelected(hasFocus || item.isSelected()));
-        holder.binding.check.setVisibility(type == 0 ? View.GONE : View.VISIBLE);
-        holder.binding.getRoot().setOnLongClickListener(v -> setLongListener(item));
-        holder.binding.getRoot().setOnClickListener(v -> setListener(item, position));
-        holder.binding.text.setGravity(Gravity.CENTER);
+        holder.bind(item);
     }
 
     private boolean getChecked(Site item) {
@@ -134,6 +162,10 @@ public class SiteAdapter extends RecyclerView.Adapter<SiteAdapter.ViewHolder> {
         notifyItemRangeChanged(0, getItemCount());
     }
 
+    private int getViewType() {
+        return type == 0 ? TYPE_SWITCH : TYPE_ACTION;
+    }
+
     private long cost() {
         return cost(adapterStart);
     }
@@ -149,11 +181,58 @@ public class SiteAdapter extends RecyclerView.Adapter<SiteAdapter.ViewHolder> {
 
     public class ViewHolder extends RecyclerView.ViewHolder {
 
-        private final AdapterSiteBinding binding;
+        private final AdapterSiteBinding actionBinding;
+        private final AdapterSiteSwitchBinding switchBinding;
+        private Site item;
 
         ViewHolder(@NonNull AdapterSiteBinding binding) {
             super(binding.getRoot());
-            this.binding = binding;
+            this.actionBinding = binding;
+            this.switchBinding = null;
+            binding.text.setGravity(Gravity.CENTER);
+            binding.getRoot().setOnClickListener(v -> click());
+            binding.getRoot().setOnLongClickListener(v -> longClick());
+            binding.getRoot().setOnFocusChangeListener((v, hasFocus) -> binding.text.setSelected(hasFocus || isSelected()));
+        }
+
+        ViewHolder(@NonNull AdapterSiteSwitchBinding binding) {
+            super(binding.getRoot());
+            this.actionBinding = null;
+            this.switchBinding = binding;
+            binding.text.setGravity(Gravity.CENTER);
+            binding.getRoot().setOnClickListener(v -> click());
+            binding.getRoot().setOnLongClickListener(v -> longClick());
+            binding.getRoot().setOnFocusChangeListener((v, hasFocus) -> binding.text.setSelected(hasFocus || isSelected()));
+        }
+
+        void bind(Site item) {
+            this.item = item;
+            if (actionBinding != null) {
+                actionBinding.text.setText(item.getName());
+                actionBinding.health.setBackgroundTintList(ColorStateList.valueOf(SiteHealthStore.getColor(item)));
+                actionBinding.check.setChecked(getChecked(item));
+                actionBinding.text.setSelected(item.isSelected());
+                actionBinding.getRoot().setSelected(item.isSelected());
+            } else {
+                switchBinding.text.setText(item.getName());
+                switchBinding.health.setBackgroundTintList(ColorStateList.valueOf(SiteHealthStore.getColor(item)));
+                switchBinding.text.setSelected(item.isSelected());
+                switchBinding.getRoot().setSelected(item.isSelected());
+            }
+        }
+
+        private boolean isSelected() {
+            return item != null && item.isSelected();
+        }
+
+        private void click() {
+            int position = getBindingAdapterPosition();
+            if (position == RecyclerView.NO_POSITION || item == null) return;
+            setListener(item, position);
+        }
+
+        private boolean longClick() {
+            return item != null && setLongListener(item);
         }
     }
 }
